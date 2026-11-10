@@ -2,7 +2,9 @@
 
 Infinite Yield Vortex Edition - command line script
 
-Creator: luarsky (GitHub,Discord)
+Creator: luarsky (GitHub, Discord)
+Contributor: impopular
+
 All credits to original Infinite Yield, its owner EdgeIY and its developers
 
 ]]
@@ -26,9 +28,9 @@ local ownerGui:Instance? = owner:WaitForChild('PlayerGui') -- inStudio and owner
 local mouse = owner:GetMouse()
 mouse.TargetFilter = ownerCharacter
 
-local VERSION = 1
+local VERSION = 2
 local PREFIX = ';'
-local CREDITS_TEXT = 'luarsky'
+local CREDITS_TEXT = 'luarsky // impopular'
 local IMAGE_ASSET_IDS = {
 	logo = 2588,
 	pin = 558,
@@ -472,6 +474,22 @@ do
 					TweenService:Create(serverInfo,TweenInfo.new(.5,'Quart','Out'),{Position=UDim2.fromScale(.5,-.5)}):Play()
 				end
 				close.MouseButton1Click:Once(onMouseButton1Click)
+			end
+		}
+	})
+end
+
+do
+	local enabled = false
+	table.insert(COMMANDS,{
+		['vordex / dex'] = {
+			description = 'Opens Dex by impopular',
+			execute = function()
+				if inStudio then notify('Dex',"Can't use in Studio") return end
+				if enabled then return end
+				enabled = true
+				notify('Loading','Hold on a sec')
+				loadstring(game:HttpGet('https://raw.githubusercontent.com/luarsky/iyve/master/vordex'))()
 			end
 		}
 	})
