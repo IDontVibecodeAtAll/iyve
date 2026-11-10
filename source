@@ -117,6 +117,7 @@ do -- from Astra docs
 	cursorMove = missing('function',mousemoveabs)
 	saveVRTXgame = missing('function',saveinstance)
 	activateClickDetectors = missing('function',fireclickdetector)
+	httpDecode = missing('function',json and json.decode or json and json.parse)
 end
 
 local function copyToClipboard(text)
@@ -351,6 +352,11 @@ do
 	end
 end
 
+if not inStudio then
+	local success,latestVersion = pcall(game.HttpGet,game,'https://raw.githubusercontent.com/luarsky/iyve/master/version')
+	if success and tonumber(latestVersion) ~= VERSION then notify('Outdated','Get the new version at github.com/luarsky/iyve') end
+end
+
 do
 	local function openReference()
 		if IY:FindFirstChild('Reference') then return end
@@ -378,6 +384,7 @@ do
 		createInstance('TextLabel',{Parent=specialPlayerCases,Name='Farthest',Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text='farthest - gets the farthest player from you',TextColor3=Color3.fromRGB(255,255,255),TextSize=13,TextXAlignment='Left',Font='Roboto'})
 		createInstance('TextLabel',{Parent=specialPlayerCases,Name='Alive',Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text='alive - gets players who are alive',TextColor3=Color3.fromRGB(255,255,255),TextSize=13,TextXAlignment='Left',Font='Roboto'})
 		createInstance('TextLabel',{Parent=specialPlayerCases,Name='Dead',Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text='dead - gets players who are dead',TextColor3=Color3.fromRGB(255,255,255),TextSize=13,TextXAlignment='Left',Font='Roboto'})
+		createInstance('TextLabel',{Parent=specialPlayerCases,Name='Cursor',Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text='cursor - gets the closest player to your mouse cursor',TextColor3=Color3.fromRGB(255,255,255),TextSize=13,TextXAlignment='Left',Font='Roboto'})
 		TweenService:Create(reference,TweenInfo.new(.5,'Quart','Out'),{Position=UDim2.fromScale(.5,.5)}):Play()
 		wait(.5)
 		startDragging(reference,referenceTitle)
@@ -390,6 +397,8 @@ do
 	end
 	terminalInfo.MouseButton1Click:Connect(openReference)
 end
+
+-- commands
 
 do
 	local sessionTime = 0
