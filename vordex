@@ -1,0 +1,372 @@
+-- Made by impopular. Uploaded by luarsky
+
+local UIS
+pcall(function() UIS = game:GetService("UserInputService") end)
+
+local function safeGet(obj, k)
+    if obj == nil then return nil end
+    local v
+    local ok = pcall(function() v = obj[k] end)
+    if ok then return v end
+    return nil
+end
+
+local function tryConnect(obj, key, fn)
+    local sig = safeGet(obj, key)
+    if sig == nil then return false end
+    local ok = pcall(function() sig:Connect(fn) end)
+    return ok
+end
+
+local function safeName(inst)
+    local ok, n = pcall(function() return inst.Name end)
+    return (ok and n) or "?"
+end
+
+local function safeClass(inst)
+    local ok, c = pcall(function() return inst.ClassName end)
+    return (ok and c) or "Instance"
+end
+
+local function setProp(obj, k, v)
+    pcall(function() obj[k] = v end)
+end
+
+local function getXY(a, b)
+    if type(a) == "number" and type(b) == "number" then return a, b end
+    if a and type(a) ~= "number" then
+        local p = safeGet(a, "Position")
+        if p then
+            local x = safeGet(p, "X") or safeGet(p, "x")
+            local y = safeGet(p, "Y") or safeGet(p, "y")
+            if type(x) == "number" and type(y) == "number" then return x, y end
+        end
+    end
+    return nil, nil
+end
+
+local KNOWN_SERVICES = {
+    "Workspace", "Players", "Lighting", "ReplicatedStorage", "ReplicatedFirst",
+    "ServerStorage", "ServerScriptService", "StarterGui", "StarterPack",
+    "StarterPlayer", "SoundService", "Chat", "TextChatService", "Teams",
+    "RunService", "HttpService", "MarketplaceService", "UserInputService",
+    "TweenService", "ContentProvider", "CollectionService",
+    "PathfindingService", "PhysicsService", "SocialService",
+    "LocalizationService", "ContextActionService", "GuiService",
+    "HapticService", "VRService", "BadgeService", "DataStoreService",
+    "MemoryStoreService", "MessagingService", "TeleportService",
+    "TestService", "LogService", "ScriptContext",
+}
+
+local function getChildren(inst)
+    local r
+    local ok = pcall(function() r = inst:GetChildren() end)
+    if ok and type(r) == "table" and #r > 0 then return r end
+    local out, seen = {}, {}
+    for i = 1, #KNOWN_SERVICES do
+        local nm = KNOWN_SERVICES[i]
+        local ok2, svc = pcall(function() return inst:GetService(nm) end)
+        if ok2 and svc ~= nil and not seen[svc] then
+            seen[svc] = true
+            out[#out + 1] = svc
+        end
+    end
+    if #out > 0 then
+        table.sort(out, function(a, b) return safeName(a) < safeName(b) end)
+        return out
+    end
+    return (ok and type(r) == "table") and r or {}
+end
+
+local players     = game:GetService("Players")
+local localPlayer = players and players.LocalPlayer
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "VortexDexExplorer"
+setProp(screenGui, "ResetOnSpawn", false)
+
+local parented = false
+if localPlayer then
+    parented = pcall(function()
+        screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+    end)
+end
+if not parented then
+    local ok = pcall(function() screenGui.Parent = game:GetService("CoreGui") end)
+    if not ok then screenGui.Parent = game end
+end
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name             = "MainFrame"
+mainFrame.Size             = UDim2.new(0, 500, 0, 600)
+mainFrame.Position         = UDim2.new(0.5, -250, 0.5, -300)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+mainFrame.Parent           = screenGui
+
+local titleBar = Instance.new("TextButton")
+titleBar.Name             = "TitleBar"
+titleBar.Size             = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+titleBar.Text             = "Vortex Dex Explorer"
+titleBar.TextColor3       = Color3.fromRGB(255, 255, 255)
+titleBar.TextSize         = 16
+titleBar.Font             = Enum.Font.Figtree
+setProp(titleBar, "AutoButtonColor", false)
+titleBar.Parent           = mainFrame
+
+local function readFramePos()
+    local xs, xo, ys, yo = 0.5, -250, 0.5, -300
+    local p = safeGet(mainFrame, "Position")
+    if p then
+        pcall(function() xs = p.X.Scale end)
+        pcall(function() xo = p.X.Offset end)
+        pcall(function() ys = p.Y.Scale end)
+        pcall(function() yo = p.Y.Offset end)
+    end
+    return { xs = xs, xo = xo, ys = ys, yo = yo }
+end
+
+local dragStart = nil
+
+local function beginDrag(x, y)
+    if type(x) ~= "number" or type(y) ~= "number" then return end
+    dragStart = { x = x, y = y, frame = readFramePos() }
+end
+
+local function moveDrag(x, y)
+    if not dragStart then return end
+    if type(x) ~= "number" or type(y) ~= "number" then return end
+    local dx = x - dragStart.x
+    local dy = y - dragStart.y
+    mainFrame.Position = UDim2.new(
+        dragStart.frame.xs, dragStart.frame.xo + dx,
+        dragStart.frame.ys, dragStart.frame.yo + dy
+    )
+end
+
+local function endDrag()
+    dragStart = nil
+end
+
+tryConnect(titleBar, "MouseButton1Down", function(a, b)
+    local x, y = getXY(a, b)
+    beginDrag(x, y)
+end)
+
+tryConnect(titleBar, "MouseButton1Up", endDrag)
+tryConnect(mainFrame, "MouseButton1Up", endDrag)
+
+tryConnect(mainFrame, "MouseMoved", function(a, b)
+    if not dragStart then return end
+    local x, y = getXY(a, b)
+    moveDrag(x, y)
+end)
+
+tryConnect(titleBar, "MouseMoved", function(a, b)
+    if not dragStart then return end
+    local x, y = getXY(a, b)
+    moveDrag(x, y)
+end)
+
+if UIS then
+    tryConnect(UIS, "InputChanged", function(input)
+        if not dragStart then return end
+        local x, y = getXY(input, nil)
+        moveDrag(x, y)
+    end)
+
+    tryConnect(UIS, "InputEnded", function(input)
+        local ut = safeGet(input, "UserInputType")
+        if ut == Enum.UserInputType.MouseButton1 then endDrag() end
+    end)
+end
+
+local listFrame, usingScrolling
+do
+    local ok, sf = pcall(function() return Instance.new("ScrollingFrame") end)
+    if ok and sf ~= nil then
+        listFrame      = sf
+        usingScrolling = true
+        setProp(sf, "CanvasSize", UDim2.new(0, 0, 0, 0))
+        setProp(sf, "ScrollBarThickness", 6)
+        setProp(sf, "ScrollingEnabled", true)
+    else
+        listFrame      = Instance.new("Frame")
+        usingScrolling = false
+        setProp(listFrame, "ClipsDescendants", true)
+    end
+end
+listFrame.Name             = "ListFrame"
+listFrame.Size             = UDim2.new(1, -20, 1, -100)
+listFrame.Position         = UDim2.new(0, 10, 0, 50)
+listFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+listFrame.Parent           = mainFrame
+
+local scrollUp = Instance.new("TextButton")
+scrollUp.Name             = "ScrollUp"
+scrollUp.Size             = UDim2.new(0.5, -15, 0, 30)
+scrollUp.Position         = UDim2.new(0, 10, 1, -40)
+scrollUp.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+scrollUp.TextColor3       = Color3.fromRGB(225, 225, 225)
+scrollUp.TextSize         = 14
+scrollUp.Font             = Enum.Font.Figtree
+scrollUp.Text             = "Scroll Up"
+scrollUp.Parent           = mainFrame
+
+local scrollDown = Instance.new("TextButton")
+scrollDown.Name             = "ScrollDown"
+scrollDown.Size             = UDim2.new(0.5, -15, 0, 30)
+scrollDown.Position         = UDim2.new(0.5, 5, 1, -40)
+scrollDown.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+scrollDown.TextColor3       = Color3.fromRGB(225, 225, 225)
+scrollDown.TextSize         = 14
+scrollDown.Font             = Enum.Font.Figtree
+scrollDown.Text             = "Scroll Down"
+scrollDown.Parent           = mainFrame
+
+local ROW_HEIGHT   = 22
+local LIST_HEIGHT  = 500
+local rootRows     = {}
+local rowData      = {}
+local scrollOffset = 0
+
+local function updateText(row)
+    local d = rowData[row]
+    row.Text = string.rep("  ", d.Depth) .. d.Arrow .. " " .. d.Label
+end
+
+local refresh
+
+local function scrollBy(delta)
+    scrollOffset = math.max(0, scrollOffset + delta)
+    refresh()
+end
+
+tryConnect(scrollUp, "MouseButton1Click", function() scrollBy(-ROW_HEIGHT * 5) end)
+tryConnect(scrollDown, "MouseButton1Click", function() scrollBy(ROW_HEIGHT * 5) end)
+
+if UIS then
+    local function handleWheel(input)
+        local ut = safeGet(input, "UserInputType")
+        if ut ~= Enum.UserInputType.MouseWheel then return end
+        local p = safeGet(input, "Position")
+        local z = p and (safeGet(p, "Z") or safeGet(p, "z")) or 0
+        if type(z) == "number" and z ~= 0 then
+            scrollBy(-z * ROW_HEIGHT * 5)
+        end
+    end
+    tryConnect(UIS, "InputChanged", handleWheel)
+    tryConnect(UIS, "InputBegan", handleWheel)
+end
+
+local function collapseDescendants(row)
+    for _, child in ipairs(rowData[row].ChildRows) do
+        local cd    = rowData[child]
+        cd.Expanded = false
+        cd.Arrow    = ">"
+        updateText(child)
+        collapseDescendants(child)
+    end
+end
+
+local function makeRow(inst, depth)
+    local d = {
+        Instance      = inst,
+        Depth         = depth,
+        ChildRows     = {},
+        Expanded      = false,
+        Built         = false,
+        Arrow         = " ",
+        Label         = "[" .. safeClass(inst) .. "] " .. safeName(inst),
+        ChildrenCache = {},
+    }
+    if inst == game then d.Label = "game" end
+
+    d.ChildrenCache = getChildren(inst)
+    if #d.ChildrenCache > 0 then d.Arrow = ">" end
+
+    local btn = Instance.new("TextButton")
+    btn.Name               = "Row"
+    btn.Size               = UDim2.new(1, 0, 0, ROW_HEIGHT)
+    btn.Position           = UDim2.new(0, 0, 0, 0)
+    btn.BackgroundColor3   = Color3.fromRGB(45, 45, 55)
+    setProp(btn, "BackgroundTransparency", 0.35)
+    btn.TextColor3         = Color3.fromRGB(225, 225, 225)
+    btn.TextSize           = 14
+    btn.TextXAlignment     = Enum.TextXAlignment.Left
+    btn.Font               = Enum.Font.Figtree
+    btn.Text               = ""
+    btn.Parent             = listFrame
+
+    rowData[btn] = d
+    updateText(btn)
+
+    tryConnect(btn, "MouseButton1Click", function()
+        if #d.ChildrenCache == 0 then return end
+        if not d.Built then
+            d.Built = true
+            for _, child in ipairs(d.ChildrenCache) do
+                d.ChildRows[#d.ChildRows + 1] = makeRow(child, depth + 1)
+            end
+        end
+        d.Expanded = not d.Expanded
+        if d.Expanded then
+            d.Arrow = "v"
+        else
+            d.Arrow = ">"
+            collapseDescendants(btn)
+        end
+        updateText(btn)
+        refresh()
+    end)
+
+    return btn
+end
+
+refresh = function()
+    local totalY = 0
+    local function measure(row, vis)
+        local d = rowData[row]
+        if vis then totalY = totalY + ROW_HEIGHT end
+        for _, c in ipairs(d.ChildRows) do measure(c, vis and d.Expanded) end
+    end
+    for _, r in ipairs(rootRows) do measure(r, true) end
+
+    local maxOff = math.max(0, totalY - LIST_HEIGHT)
+    if scrollOffset > maxOff then scrollOffset = maxOff end
+
+    local y = 0
+    local function place(row, vis)
+        local d = rowData[row]
+        row.Visible = vis
+        if vis then
+            local yOff = usingScrolling and y or (y - scrollOffset)
+            row.Position = UDim2.new(0, 0, 0, yOff)
+            y = y + ROW_HEIGHT
+        end
+        for _, c in ipairs(d.ChildRows) do place(c, vis and d.Expanded) end
+    end
+    for _, r in ipairs(rootRows) do place(r, true) end
+
+    if usingScrolling then
+        setProp(listFrame, "CanvasSize", UDim2.new(0, 0, 0, totalY))
+    end
+end
+
+local gameRow = makeRow(game, 0)
+rootRows[#rootRows + 1] = gameRow
+
+do
+    local d = rowData[gameRow]
+    if #d.ChildrenCache > 0 then
+        d.Built = true
+        for _, child in ipairs(d.ChildrenCache) do
+            d.ChildRows[#d.ChildRows + 1] = makeRow(child, 1)
+        end
+        d.Expanded = true
+        d.Arrow    = "v"
+        updateText(gameRow)
+    end
+end
+
+refresh()
