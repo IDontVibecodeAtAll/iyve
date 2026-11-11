@@ -350,6 +350,7 @@ refresh = function()
 
     if usingScrolling then
         setProp(listFrame, "CanvasSize", UDim2.new(0, 0, 0, totalY))
+        setProp(listFrame, "CanvasPosition", Vector2.new(0, scrollOffset))
     end
 end
 

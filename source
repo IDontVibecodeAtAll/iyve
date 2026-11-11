@@ -27,6 +27,10 @@ local ownerBackpack:Backpack = owner:WaitForChild('Backpack')
 local ownerGui:Instance? = owner:WaitForChild('PlayerGui') -- inStudio and owner:WaitForChild('PlayerGui') or game:GetService('CoreGui')
 local mouse = owner:GetMouse()
 mouse.TargetFilter = ownerCharacter
+local raycastParams = {FilterDescendantsInstances = {ownerCharacter},FilterType = 'Exclude'}
+local terminalBarTyping = false
+local clipboard,cursorMove,saveVRTXgame,activateClickDetectors,httpDecode,net
+local getMoveDirection,getUpDown,startDragging,stopDragging
 
 local VERSION = 3.01
 local PREFIX = ';'
@@ -48,7 +52,7 @@ end
 
 local function killThread(thread)
 	local threadStatus = coroutine.status(thread)
-	if threadStatus == 'running' or threadStatus == 'suspended' then --[[task.cancel(thread)]] coroutine.close(thread) end
+	if threadStatus == 'suspended' then --[[task.cancel(thread)]] coroutine.close(thread) end
 end
 
 local function killConnection(connection)
@@ -127,7 +131,7 @@ do -- from Astra docs
 	saveVRTXgame = missing('function',saveinstance)
 	activateClickDetectors = missing('function',fireclickdetector)
 	httpDecode = missing('function',json and json.decode or json and json.parse)
-    net = network
+	net = missing('table',network) or nil
 end
 
 local function copyToClipboard(text)
@@ -140,30 +144,37 @@ end
 -- game functions
 
 local function getRootPart(player:Player?):BasePart?
-	local character = player.Character
+	local character = player and player.Character
 	return character and character:WaitForChild('HumanoidRootPart')
 end
 
 local function getHumanoid(player:Player?):Humanoid?
-	local character = player.Character
+	local character = player and player.Character
 	return character and character:WaitForChild('Humanoid')
 end
 
 do -- credits to rasen46 (Vortex,Discord,GitHub)
-	local moveDirection = Vector3.zero
+	local moveDirection,flatDirection = Vector3.zero,Vector3.zero
+	local function unit(v)
+		return v.Magnitude > .001 and v.Unit or Vector3.zero
+	end
 	local function onHeartbeat()
-		local cameraCFrame = workspace.CurrentCamera.CFrame
-		local forward,right = cameraCFrame.LookVector,cameraCFrame.RightVector
-		local sides = {W=forward,A=-right,S=-forward,D=right}
-		moveDirection = Vector3.zero
-		for i,v in sides do
-			moveDirection += UserInputService:IsKeyDown(i) and v or moveDirection
-		end
-		moveDirection = moveDirection.Unit
+		local forward = (UserInputService:IsKeyDown('W') and 1 or 0)-(UserInputService:IsKeyDown('S') and 1 or 0)
+		local side = (UserInputService:IsKeyDown('D') and 1 or 0)-(UserInputService:IsKeyDown('A') and 1 or 0)
+		if terminalBarTyping or (forward == 0 and side == 0) then moveDirection,flatDirection = Vector3.zero,Vector3.zero return end
+		local success,cameraCFrame = pcall(function() return workspace.CurrentCamera.CFrame end)
+		if not success or not cameraCFrame then cameraCFrame = ownerCharacter:GetPivot() end
+		local look,right = cameraCFrame.LookVector,cameraCFrame.RightVector
+		moveDirection = unit(look*forward+right*side)
+		flatDirection = unit(unit(Vector3.new(look.X,0,look.Z))*forward+unit(Vector3.new(right.X,0,right.Z))*side)
 	end
 	RunService.Heartbeat:Connect(onHeartbeat)
-	function getMoveDirection(y)
-		return Vector3.new(moveDirection.X,y and moveDirection.Y or 0,moveDirection.Z)
+	getMoveDirection = function(y)
+		return y and moveDirection or flatDirection
+	end
+	getUpDown = function()
+		if terminalBarTyping then return 0 end
+		return (UserInputService:IsKeyDown('E') and 1 or 0)-(UserInputService:IsKeyDown('Q') and 1 or 0)
 	end
 end
 
@@ -203,11 +214,12 @@ end
 
 local function getStringArgument(text:string?,availables)
 	text = text and text:lower()
-	return table.find(availables,text) and text or availables[1]
+	return table.find(availables,text) and text or nil
 end
 
 local function getPlayerArgument(text:string?):{Player?}
 	text = text and text:lower()
+	if not text or text == '' then return {} end
 	local allPlayers = (inStudio and workspace:FindFirstChild('FakePlayers')) and workspace.FakePlayers:GetChildren() or Players:GetPlayers() -- Halo, server & clients or team create when? 
 	if text == 'all' then
 		return allPlayers
@@ -221,6 +233,7 @@ local function getPlayerArgument(text:string?):{Player?}
 		return {owner}
 	elseif text:find('#') == 1 and tonumber(text:sub(2,-1)) then
 		local randomPlayers = {}
+		if #allPlayers == 0 then return randomPlayers end
 		for _=1,math.clamp(tonumber(text:sub(2,-1)),1,#allPlayers) do
 			local randomPlayer:Player? = allPlayers[math.random(1,#allPlayers)]
 			table.insert(randomPlayers,randomPlayer)
@@ -230,6 +243,7 @@ local function getPlayerArgument(text:string?):{Player?}
 	elseif text == 'random' then
 		local ownerIndex = table.find(allPlayers,owner)
 		if ownerIndex then table.remove(allPlayers,ownerIndex) end
+		if #allPlayers == 0 then return {} end
 		return {allPlayers[math.random(1,#allPlayers)]}
 	elseif text:find('rad') == 1 and tonumber(text:sub(4,-1)) then
 		local radius = tonumber(text:sub(4,-1))
@@ -246,14 +260,15 @@ local function getPlayerArgument(text:string?):{Player?}
 			if v ~= owner and character then table.insert(distances,{v,(character:GetPivot().Position-ownerCharacter:GetPivot().Position).Magnitude}) end
 		end
 		table.sort(distances,function(distance1,distance2)
-			return text == 'nearest' and distance1[2] < distance2[2] or distance1[2] > distance2[2]
+			if text == 'nearest' then return distance1[2] < distance2[2] end
+			return distance1[2] > distance2[2]
 		end)
 		return #distances > 0 and {distances[1][1]} or {}
 	elseif text == 'alive' or text == 'dead' then
 		local aliveORdead = {}
 		for _,v:Player? in allPlayers do
 			local humanoid = getHumanoid(v)
-			if v ~= owner and humanoid and (text == 'dead' and humanoid:IsDead() or not humanoid:IsDead()) then table.insert(aliveORdead,v) end
+			if v ~= owner and humanoid and humanoid:IsDead() == (text == 'dead') then table.insert(aliveORdead,v) end
 		end
 		return aliveORdead
 	elseif text == 'cursor' then
@@ -261,167 +276,52 @@ local function getPlayerArgument(text:string?):{Player?}
 		local nearestDistance,nearestPlayer = math.huge,nil
 		for _,v:Player? in allPlayers do
 			local character = v.Character
-			local distance = character and (character:GetPivot().Position-cursorWorldPosition).Magnitude
+			local distance = v ~= owner and character and (character:GetPivot().Position-cursorWorldPosition).Magnitude
 			if not distance or distance > nearestDistance then continue end
 			nearestPlayer = v
 			nearestDistance = distance
 		end
 		return {nearestPlayer}
-	elseif text and text ~= '' then
-		local found = {}
-		for _,v:Player? in allPlayers do
-			if v ~= owner and v.Name:lower():find(text) == 1 then table.insert(found,v) end
-		end
-		return found
 	end
-	return {}
+	local found = {}
+	for _,v:Player? in allPlayers do
+		if v ~= owner and v.Name:lower():sub(1,#text) == text then table.insert(found,v) end
+	end
+	return found
 end
 
 -- Command functions: chat
 
-local function GetCharMap()
-local CharMap = {
-    ["0"] = 0x30,
-    ["1"] = 0x31,
-    ["2"] = 0x32,
-    ["3"] = 0x33,
-    ["4"] = 0x34,
-    ["5"] = 0x35,
-    ["6"] = 0x36,
-    ["7"] = 0x37,
-    ["8"] = 0x38,
-    ["9"] = 0x39,
-
-    ["-"] = 0x2D,
-    ["="] = 0x3D,
-
-    ["Q"] = 0x51,
-    ["W"] = 0x57,
-    ["E"] = 0x45,
-    ["R"] = 0x52,
-    ["T"] = 0x54,
-    ["Y"] = 0x59,
-    ["U"] = 0x55,
-    ["I"] = 0x49,
-    ["O"] = 0x4F,
-    ["P"] = 0x50,
-    ["["] = 0x5B,
-    ["]"] = 0x5D,
-
-    ["A"] = 0x41,
-    ["S"] = 0x53,
-    ["D"] = 0x44,
-    ["F"] = 0x46,
-    ["G"] = 0x47,
-    ["H"] = 0x48,
-    ["J"] = 0x4A,
-    ["K"] = 0x4B,
-    ["L"] = 0x4C,
-    [";"] = 0x3B,
-    ["'"] = 0x27,
-
-    ["Z"] = 0x5A,
-    ["X"] = 0x58,
-    ["C"] = 0x43,
-    ["V"] = 0x56,
-    ["B"] = 0x42,
-    ["N"] = 0x4E,
-    ["M"] = 0x4D,
-    [","] = 0x2C,
-    ["."] = 0x2E,
-    ["/"] = 0x2F,
-
-    ["`"] = 0x60,
-    [" "] = 0x20,
-    ["\\"] = 0x5C,
-
-    ["*"] = 0x2A,
-    ["<"] = 0x3C,
-    [">"] = 0x3E,
-    ["?"] = 0x3F,
-    ["!"] = 0x21,
-    ["@"] = 0x40,
-    ["#"] = 0x23,
-    ["$"] = 0x24,
-    ["%"] = 0x25,
-    ["^"] = 0x5E,
-    ["&"] = 0x26,
-    ["("] = 0x28,
-    [")"] = 0x29,
-
-    ["q"] = 0x71,
-    ["w"] = 0x77,
-    ["e"] = 0x65,
-    ["r"] = 0x72,
-    ["t"] = 0x74,
-    ["y"] = 0x79,
-    ["u"] = 0x75,
-    ["i"] = 0x69,
-    ["o"] = 0x6F,
-    ["p"] = 0x70,
-    ["a"] = 0x61,
-    ["s"] = 0x73,
-    ["d"] = 0x64,
-    ["f"] = 0x66,
-    ["g"] = 0x67,
-    ["h"] = 0x68,
-    ["j"] = 0x6A,
-    ["k"] = 0x6B,
-    ["l"] = 0x6C,
-    ["z"] = 0x7A,
-    ["x"] = 0x78,
-    ["c"] = 0x63,
-    ["v"] = 0x76,
-    ["b"] = 0x62,
-    ["n"] = 0x6E,
-    ["m"] = 0x6D,
-}
-
-return table.freeze(CharMap)
-
-end
-
-local function ToHex(Number: number)
-    return string.format("%X", Number)
-end
-
-local function ToDec(Hex: string)
-    return tonumber(Hex, 16)
-end
-
 local function TextLength(Message: string)
     local Length = string.len(Message)
-    if Length < 16 then
-        return "0"..ToHex(Length)
-    else
-       return ToHex(Length) 
+    local Bytes = {}
+    for _ = 1, 8 do
+        table.insert(Bytes, string.format("%02X", Length % 256))
+        Length = math.floor(Length / 256)
     end
+    return table.concat(Bytes, "")
 end
 
 local function StringToBytes(Username: string)
-    local SplitUser = string.split(Username, "")
     local Temp = {}
-    
-    for _, Char in pairs(SplitUser) do
-        table.insert(Temp, ToHex(GetCharMap()[Char]))
+    for i = 1, string.len(Username) do
+        table.insert(Temp, string.format("%02X", string.byte(Username, i)))
     end
-    
     return table.concat(Temp, "")
 end
 
 local function ConstructRawPacket(Username: string, Text: string)
     local Packet = "0200000002C6010000000000" 
     .. TextLength(Username) 
-    .. "00000000000000" 
     .. StringToBytes(Username) 
     .. TextLength(Text) 
-    .. "00000000000000"
     .. StringToBytes(Text) .. "00"
     return Packet
 end
 
 local function SendChatPacket(Message: string)
-    if net then
+    if Message == '' then return end
+    if net and typeof(net.create) == "function" and typeof(net.send) == "function" then
         -- Astra
         local ChatPacket = net.create("Chat", {
             username = owner.Name,
@@ -458,13 +358,18 @@ local function execute(text:string,viaTerminal)
 		for name,data in command do
 			for _,v in getCommandNames(name) do
 				if v ~= textData[1] then continue end
-				code = data.execute 
-				argumentsText = text:gsub(`{v}{text:match(`{v} `) and ' ' or ''}`,'')
-				break 
+				code = data.execute
+				argumentsText = text:sub(#v+2)
+				break
 			end
+			if code then break end
 		end
+		if code then break end
 	end
-	if not code then return end
+	if not code then
+		if viaTerminal and textData[1] ~= '' then notify('Command',`Unknown command "{textData[1]}"`) end
+		return
+	end
 	if viaTerminal then
 		table.insert(cmdHistory,text)
 		if #cmdHistory > 30 then
@@ -491,21 +396,31 @@ local function stopLoopCommands()
 	execute('unstare')
 	execute('unjerk')
 	execute('unspasm')
-	execute(`thaw {owner.Name}`)
+	execute('thaw me')
 end
 
 ownerHumanoid.Died:Connect(stopLoopCommands)
 
+owner.CharacterAdded:Connect(function(character)
+	if character == ownerCharacter then return end
+	ownerCharacter = character
+	ownerRootPart = character:WaitForChild('HumanoidRootPart')
+	ownerHumanoid = character:WaitForChild('Humanoid')
+	raycastParams.FilterDescendantsInstances = {character}
+	pcall(function() mouse.TargetFilter = character end)
+	ownerHumanoid.Died:Connect(stopLoopCommands)
+end)
+
 do
 	local drags = {}
-	function stopDragging(dragObject)
+	stopDragging = function(dragObject)
 		if not drags[dragObject] then return end
 		for _,v in drags[dragObject] do
 			v = killConnection(v)
 		end
 		drags[dragObject] = nil
 	end
-	function startDragging(dragObject:Frame,dragDetector:TextButton)
+	startDragging = function(dragObject:Frame,dragDetector:TextButton)
 		if drags[dragObject] then return end
 		drags[dragObject] = {}
 		local function onMouseButton1Down()
@@ -531,7 +446,7 @@ end
 
 if not inStudio then
 	local success,latestVersion = pcall(game.HttpGet,game,'https://raw.githubusercontent.com/luarsky/iyve/master/version')
-	if success and VERSION < tonumber(latestVersion) then notify('Outdated','Get the new version at github.com/luarsky/iyve') end
+	if success and tonumber(latestVersion) and VERSION < tonumber(latestVersion) then notify('Outdated','Get the new version at github.com/luarsky/iyve') end
 end
 
 do
@@ -672,7 +587,7 @@ end
 
 table.insert(COMMANDS,{
 	['commandcount / cmdcount'] = {
-		description = 'Shows how many teams there are currently',
+		description = 'Shows how many commands there are',
 		execute = function()
 			local amount = 0
 			for _,command in COMMANDS do
@@ -695,12 +610,15 @@ do
 				if check ~= '' then notify('Anti AFK',check) return end
 				enabled = true
 				notify('Anti AFK','Enabled')
-				while wait(600) do
-					local currentX,currentY = mouse.X,mouse.Y
-					cursorMove(currentX+1,currentY+1)
-					wait()
-					cursorMove(currentX,currentY)
-				end
+				local idling = coroutine.create(function()
+					while wait(600) do
+						local currentX,currentY = mouse.X,mouse.Y
+						cursorMove(currentX+1,currentY+1)
+						wait()
+						cursorMove(currentX,currentY)
+					end
+				end)
+				coroutine.resume(idling)
 			end
 		}
 	})
@@ -765,7 +683,7 @@ do
 		['setnetlib'] = {
 			description = 'Sets the networking library to the requested one',
 			execute = function(netlib: string)
-                local NetLibrary = _G[netlib] or getgenv()[netlib]
+                local NetLibrary = _G[netlib] or (typeof(getgenv) == "function" and getgenv()[netlib])
 				if NetLibrary and typeof(NetLibrary) == "table" then
                     SetNetLibrary(NetLibrary)
                 end
@@ -795,13 +713,11 @@ do
 				local function onInputBegan(input:InputObject,gameProcessedEvent)
 					if gameProcessedEvent or (input.KeyCode ~= Enum.KeyCode.Backspace and input.KeyCode ~= Enum.KeyCode.Delete) then return end
 					for i:Instance,v in hovers do
-						local isIY do
-							local lastParent:Instance?
-							repeat
-								wait()
-								lastParent = lastParent and lastParent.Parent or i.Parent
-								if lastParent == IY then isIY = true break end
-							until lastParent == ownerGui
+						local isIY = false
+						local lastParent = i.Parent
+						while lastParent and lastParent ~= ownerGui do
+							if lastParent == IY then isIY = true break end
+							lastParent = lastParent.Parent
 						end
 						if not v.status or isIY then continue end
 						v.enterConnection = killConnection(v.enterConnection)
@@ -905,12 +821,9 @@ do
 					if not part.Parent then continue end
 					for property,v in data do
 						part[property] = v
-						part[property] = nil
 					end
 				end
-				parts = nil
-				parts = {}
-				--table.clear(parts)
+				table.clear(parts)
 			end
 		}
 	})
@@ -941,28 +854,34 @@ table.insert(COMMANDS,{
 })
 
 do
-	local SPEED,MIN_SPEED,MAX_SPEED = 50,50,150
-	local GHOSTING = false
-	local noclipping
+	local SPEED,MIN_SPEED,MAX_SPEED = 16,0,250
+	local collisions = {}
+	local noclipping,walkSpeed
 	table.insert(COMMANDS,{
-		['noclip [speed] [ghosting]'] = {
-			description = `Go through objects (min speed - {MIN_SPEED}, max - {MAX_SPEED}; default ghosting - {GHOSTING})`,
+		['noclip [speed]'] = {
+			description = `Go through objects (default speed - your walkspeed, max - {MAX_SPEED})`,
 			execute = function(text:string)
 				if noclipping or ownerHumanoid:IsDead() then return end
-				local arguments = text:split(' ')
-				SPEED = getNumberArgument(arguments[1],MIN_SPEED,MAX_SPEED) or SPEED
-				local newGhosting = getBooleanArgument(arguments[2])
-				GHOSTING = if newGhosting ~= nil then newGhosting else GHOSTING
 				stopLoopCommands()
-				local lastPivot = ownerCharacter:GetPivot()
+				walkSpeed = ownerHumanoid.WalkSpeed
+				SPEED = getNumberArgument(text:split(' ')[1],MIN_SPEED,MAX_SPEED) or walkSpeed
+				ownerHumanoid.WalkSpeed = 0
+				local position = ownerCharacter:GetPivot().Position
 				local function onHeartbeat(deltaTime)
 					if ownerHumanoid:IsDead() then return end
+					for _,v in ownerCharacter:GetDescendants() do
+						if not v:IsA('BasePart') then continue end
+						if collisions[v] == nil then
+							local success,canCollide = pcall(function() return v.CanCollide end)
+							collisions[v] = success and canCollide or false
+						end
+						pcall(function() v.CanCollide = false end)
+					end
+					local pivot = ownerCharacter:GetPivot()
 					local moveDirection = getMoveDirection()
-					if moveDirection == Vector3.zero then lastPivot = ownerCharacter:GetPivot() return end
+					position = Vector3.new(position.X,pivot.Position.Y,position.Z)+moveDirection*deltaTime*SPEED
 					ownerCharacter.Velocity = Vector3.new(0,ownerCharacter.Velocity.Y,0)
-					local newPivot = ownerCharacter:GetPivot()+moveDirection*deltaTime*SPEED
-					ownerCharacter:PivotTo(GHOSTING and lastPivot:Lerp(newPivot,deltaTime) or newPivot)
-					lastPivot = newPivot
+					ownerCharacter:PivotTo(moveDirection == Vector3.zero and CFrame.new(position)*pivot.Rotation or CFrame.lookAt(position,position+moveDirection))
 				end
 				noclipping = RunService.Heartbeat:Connect(onHeartbeat)
 			end
@@ -974,6 +893,12 @@ do
 			execute = function()
 				if not noclipping then return end
 				noclipping = killConnection(noclipping)
+				for i,v in collisions do
+					pcall(function() i.CanCollide = v end)
+				end
+				table.clear(collisions)
+				if walkSpeed then ownerHumanoid.WalkSpeed = walkSpeed end
+				walkSpeed = nil
 			end
 		}
 	})
@@ -985,7 +910,7 @@ do
 	local flying
 	table.insert(COMMANDS,{
 		['fly [speed]'] = {
-			description = `Makes you fly with BodyMovers (min speed - {MIN_SPEED}, max - {MAX_SPEED})`,
+			description = `Makes you fly with BodyMovers, E/Q to go up/down (min speed - {MIN_SPEED}, max - {MAX_SPEED})`,
 			execute = function(text:string)
 				if flying or ownerHumanoid:IsDead() then return end
 				SPEED = getNumberArgument(text:split(' ')[1],MIN_SPEED,MAX_SPEED) or SPEED
@@ -995,8 +920,8 @@ do
 				local function onHeartbeat()
 					if ownerHumanoid:IsDead() then return end
 					stopSitting()
-					local moveDirection = getMoveDirection(true)
-					bodyVelocity.Velocity = moveDirection == Vector3.zero and Vector3.yAxis*2 or moveDirection*SPEED
+					local moveDirection = getMoveDirection(true)+Vector3.yAxis*getUpDown()
+					bodyVelocity.Velocity = moveDirection.Magnitude < .001 and Vector3.yAxis*2 or moveDirection.Unit*SPEED
 				end
 				flying = RunService.Heartbeat:Connect(onHeartbeat)
 			end
@@ -1030,7 +955,7 @@ do -- not really like original but yes
 	local flying
 	table.insert(COMMANDS,{
 		['cframefly / cfly [speed]'] = {
-			description = `Makes you fly with CFrame (min speed - {MIN_SPEED}, max - {MAX_SPEED})`,
+			description = `Makes you fly with CFrame, E/Q to go up/down (min speed - {MIN_SPEED}, max - {MAX_SPEED})`,
 			execute = function(text:string)
 				if flying or ownerHumanoid:IsDead() then return end
 				SPEED = getNumberArgument(text:split(' ')[1],MIN_SPEED,MAX_SPEED) or SPEED
@@ -1039,8 +964,8 @@ do -- not really like original but yes
 				local function onHeartbeat(deltaTime)
 					if ownerHumanoid:IsDead() then return end 
 					stopSitting()
-					local moveDirection = getMoveDirection(true)
-					local newPivot = CFrame.new(moveDirection == Vector3.zero and lastPosition or lastPosition+moveDirection*deltaTime*SPEED)
+					local moveDirection = getMoveDirection(true)+Vector3.yAxis*getUpDown()
+					local newPivot = CFrame.new(moveDirection.Magnitude < .001 and lastPosition or lastPosition+moveDirection.Unit*deltaTime*SPEED)
 					ownerCharacter.Velocity = Vector3.zero
 					ownerCharacter:PivotTo(newPivot*workspace.CurrentCamera.CFrame.Rotation)
 					lastPosition = newPivot.Position
@@ -1150,7 +1075,7 @@ table.insert(COMMANDS,{
 			execute('unloopgoto')
 			execute('unbang')
 			execute('uncarpet')
-			execute(`thaw {owner.Name}`)
+			execute('thaw me')
 			stopSitting()
 			local targetPivot = character:GetPivot()
 			local targetPosition = targetPivot.Position
@@ -1169,7 +1094,7 @@ table.insert(COMMANDS,{
 			execute('unloopgoto')
 			execute('unbang')
 			execute('uncarpet')
-			execute(`thaw {owner.Name}`)
+			execute('thaw me')
 			stopSitting()
 			local targetPivot = character:GetPivot()
 			local targetPosition = targetPivot.Position
@@ -1196,7 +1121,7 @@ do
 				execute('unloopgoto')
 				execute('unbang')
 				execute('uncarpet')
-				execute(`thaw {owner.Name}`)
+				execute('thaw me')
 				--[[loop = task.spawn(function()
 					repeat
 						wait(DELAY)
@@ -1244,7 +1169,7 @@ do
 				execute('unloopgoto')
 				execute('unbang')
 				execute('uncarpet')
-				execute(`thaw {owner.Name}`)
+				execute('thaw me')
 				local lastPivot = ownerCharacter:GetPivot()
 				ownerCharacter:PivotTo(character:GetPivot()+Vector3.xAxis*3)
 				wait(DELAY)
@@ -1270,7 +1195,7 @@ table.insert(COMMANDS,{
 })
 
 do
-	local DISTANCE,MIN_DISATNCE,MAX_DISTANCE = 3,0,math.huge
+	local DISTANCE,MIN_DISTANCE,MAX_DISTANCE = 3,0,math.huge
 	local DELAY,MIN_DELAY,MAX_DELAY = 0,0,math.huge
 	local broughtPlayers = {}
 	local loop
@@ -1281,7 +1206,7 @@ do
 				local arguments = text:split(' ')
 				local newBroughtPlayers = getPlayerArgument(arguments[1])
 				if not newBroughtPlayers or #newBroughtPlayers == 0 then return end
-				DISTANCE = getNumberArgument(arguments[2],MIN_DISATNCE,MAX_DISTANCE) or DISTANCE
+				DISTANCE = getNumberArgument(arguments[2],MIN_DISTANCE,MAX_DISTANCE) or DISTANCE
 				DELAY = getNumberArgument(arguments[3],MIN_DELAY,MAX_DELAY) or DELAY
 				for _,v in newBroughtPlayers do
 					if not table.find(broughtPlayers,v) then table.insert(broughtPlayers,v) end
@@ -1314,7 +1239,8 @@ do
 			description = 'Undoes loopclientbring for a player',
 			execute = function(text:string)
 				if not loop then return end
-				local undoPlayers = getPlayerArgument(text:split(' ')[1]) or 'all'
+				local argument = text:split(' ')[1]:lower()
+				local undoPlayers = (argument == '' or argument == 'all') and 'all' or getPlayerArgument(argument)
 				local function undoAll()
 					loop = killThread(loop)
 					table.clear(broughtPlayers)
@@ -1341,7 +1267,8 @@ do
 		['freeze / fr [player] (CLIENT)'] = {
 			description = 'Freezes a player',
 			execute = function(text:string)
-				local newFrozenPlayers = getPlayerArgument(text:split(' ')[1]) or {owner}
+				local argument = text:split(' ')[1]
+				local newFrozenPlayers = argument == '' and {owner} or getPlayerArgument(argument)
 				if not newFrozenPlayers or #newFrozenPlayers == 0 then return end
 				for _,v:Player in newFrozenPlayers do
 					local character = v.Character
@@ -1365,7 +1292,8 @@ do
 			description = 'Unfreezes a player',
 			execute = function(text:string)
 				if not connection then return end
-				local undoPlayers = getPlayerArgument(text:split(' ')[1]) or 'all'
+				local argument = text:split(' ')[1]:lower()
+				local undoPlayers = (argument == '' or argument == 'all') and 'all' or getPlayerArgument(argument)
 				local function undoAll()
 					connection = killConnection(connection)
 					table.clear(frozenPlayers)
@@ -1395,7 +1323,7 @@ do
 				execute('unloopgoto')
 				execute('unbang')
 				execute('uncarpet')
-				execute(`thaw {owner.Name}`)
+				execute('thaw me')
 				ownerCharacter:PivotTo(ownerCharacter:GetPivot()*CFrame.new(0,0,-DISTANCE))
 			end
 		}
@@ -1410,7 +1338,7 @@ do
 		['spawnpoint / spawn [delay]'] = {
 			description = 'Sets a position where you will spawn in certain delay',
 			execute = function(text:string)
-				DELAY = getNumberArgument(text:split(' ')[1]) or DELAY
+				DELAY = getNumberArgument(text:split(' ')[1],MIN_DELAY,MAX_DELAY) or DELAY
 				spawnLocation = ownerCharacter:GetPivot()
 				notify('Spawn Point',`Spawn point created at {spawnLocation.Position}`)
 				if enabled then return end
@@ -1584,7 +1512,7 @@ do
 			if espEnabled then mark(player) end
 		end
 		local function onPlayerRemoving(player)
-			if not espEnabled then unmark(player) end
+			unmark(player)
 		end
 		Players.PlayerAdded:Connect(onPlayerAdded)
 		Players.PlayerRemoving:Connect(onPlayerRemoving)
@@ -1650,13 +1578,9 @@ do
 			description = 'Restores transparency to all parts in workspace',
 			execute = function()
 				for i:BasePart,v in xrayParts do
-					if not i.Parent then continue end
-					i.Transparency = v
-					xrayParts[i] = nil
+					if i.Parent then i.Transparency = v end
 				end
-				xrayParts = nil
-				xrayParts = {}
-				--table.clear(xrayParts)
+				table.clear(xrayParts)
 			end
 		}
 	})
@@ -1674,7 +1598,7 @@ table.insert(COMMANDS,{
 			execute('unloopgoto')
 			execute('unbang')
 			execute('uncarpet')
-			execute(`thaw {owner.Name}`)
+			execute('thaw me')
 			stopSitting()
 			ownerCharacter:PivotTo(CFrame.new(mouse.Origin.Position)*ownerCharacter:GetPivot().Rotation)
 		end
@@ -1689,7 +1613,7 @@ table.insert(COMMANDS,{
 			execute('unloopgoto')
 			execute('unbang')
 			execute('uncarpet')
-			execute(`thaw {owner.Name}`)
+			execute('thaw me')
 			stopSitting()
 			TweenService:Create(ownerRootPart,TweenInfo.new(cmdTweenSpeed,'Linear'),{Position = mouse.Origin.Position}):Play()
 		end
@@ -1754,14 +1678,14 @@ table.insert(COMMANDS,{
 
 table.insert(COMMANDS,{
 	['fireclickdetectors / firecd [name]'] = {
-		description = '',
+		description = 'Fires every ClickDetector, or only the ones with that name',
 		execute = function(text:string)
 			local check = inStudio and "Can't run in Studio" or not activateClickDetectors and "Your exploit doesn't support this feature" or ''
 			if check ~= '' then notify('Fire ClickDetectors',check) return end
 			local findName = text:split(' ')[1]:lower()
 			findName = findName == '' and 'all' or findName
 			for _,v in workspace:GetDescendants() do
-				if v:IsA('ClickDetector') then activateClickDetectors(v) elseif v:IsA('ClickDetector') and v.Name:lower() == findName then activateClickDetectors(v) end
+				if v:IsA('ClickDetector') and (findName == 'all' or v.Name:lower() == findName) then activateClickDetectors(v) end
 			end
 		end
 	}
@@ -1836,7 +1760,7 @@ do
 				end)]]
 				banging = coroutine.create(function()
 					repeat
-						if humanoid:IsDead() or ownerHumanoid:IsDead() then continue end
+						if humanoid:IsDead() or ownerHumanoid:IsDead() then wait() continue end
 						for i=1,2 do
 							for step = i == 1 and 1 or DEGREE,i == 1 and DEGREE or 0,i == 1 and SPEED or -SPEED do
 								rotate(step)
@@ -2103,7 +2027,7 @@ do
 			description = `Spins your character (min speed - {MIN_SPEED}, max speed - {MAX_SPEED})`,
 			execute = function(text:string)
 				SPEED = getNumberArgument(text:split(' ')[1],MIN_SPEED,MAX_SPEED) or SPEED
-				bodyAngularVelocity = bodyAngularVelocity or createInstance('BodyAngularVelocity',{Parent=ownerRootPart,MaxTorque=Vector3.yAxis*9e9})
+				bodyAngularVelocity = (bodyAngularVelocity and bodyAngularVelocity.Parent) and bodyAngularVelocity or createInstance('BodyAngularVelocity',{Parent=ownerRootPart,MaxTorque=Vector3.yAxis*9e9})
 				bodyAngularVelocity.AngularVelocity = Vector3.yAxis*SPEED
 			end
 		}
@@ -2121,7 +2045,6 @@ do
 end
 
 do
-	local raycastParams = {FilterDescendantsInstances = {ownerCharacter},FilterType = 'Exclude'}
 	local connection
 	table.insert(COMMANDS,{
 		['upsidedown (GLITCHY)'] = {
@@ -2232,7 +2155,7 @@ table.insert(COMMANDS,{
 			local player = getPlayerArgument(text:split(' ')[1])[1]
 			local character = player and player.Character
 			local humanoid = getHumanoid(player)
-			if not humanoid or humanoid:IsDead() or ownerHumanoid:IsDead() then return end
+			if not character or not humanoid or player == owner or humanoid:IsDead() or ownerHumanoid:IsDead() then return end
 			local lastCFrame = ownerCharacter:GetPivot()
 			ownerCharacter:PivotTo(character:GetPivot()*CFrame.new(0,0,-2)*CFrame.Angles(0,math.rad(180),0))
 			wait(.5)
@@ -2420,7 +2343,6 @@ do
 	local textSize = 17
 	local label:TextLabel = createInstance('TextLabel',{Parent=playerHovers,AnchorPoint=Vector2.xAxis,Size=UDim2.fromOffset(0,textSize),BackgroundTransparency=1,Text='',TextColor3=Color3.fromRGB(255,255,255),TextSize=textSize,Font='Roboto',Visible=false})
 	createInstance('UIStroke',{Parent=label,Thickness=1.5})
-	local raycastParams = {FilterDescendantsInstances = {ownerCharacter},FilterType = 'Exclude'}
 	local connection
 	local function getLabelSize()
 		return UDim2.fromOffset(TextService:GetTextSize(label.Text,label.TextSize,label.Font,Vector2.new(math.huge,textSize)).X+5,textSize+1.5)
@@ -2640,7 +2562,7 @@ do
 	end
 	local function showAvailableCommands()
 		for _,v in cmdList:GetChildren() do
-			if v:IsA('TextButton') then v.Visible = v.Name:match(barTextBox.Text) and true or false end
+			if v:IsA('TextButton') then v.Visible = v.Name:find(barTextBox.Text,1,true) and true or false end
 		end
 		resize()
 	end
@@ -2711,7 +2633,7 @@ do
 			local autocomplete = ''
 			for _,v in cmdList:GetChildren() do
 				local name = v.Name
-				if v:IsA('TextButton') and name ~= '' and name:match(currentText) then autocomplete = getCommandNames(name)[1] break end
+				if v:IsA('TextButton') and name ~= '' and name:find(currentText,1,true) then autocomplete = getCommandNames(name)[1] break end
 			end
 			historyCount = (inputType == 'history' and key == 'up' and historyCount == 0) and #cmdHistory or (inputType == 'history' and key == 'up' and #cmdHistory > 1) and math.clamp(historyCount-1,1,#cmdHistory) or (inputType == 'history' and key == 'down' and historyCount ~= 0 and cmdHistory[historyCount+1]) and historyCount+1 or historyCount
 			barTextBox.Text = inputType == 'typing' and currentText..(keyReplacements[key] or key) or (inputType == 'editing' and key == 'backspace') and currentText:sub(1,currentText:len()-1) or inputType == 'autocomplete' and `{autocomplete} ` or inputType == 'history' and (cmdHistory[historyCount] or '') or currentText
