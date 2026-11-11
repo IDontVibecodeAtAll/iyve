@@ -3,7 +3,7 @@
 Infinite Yield Vortex Edition - command line script
 
 Creator: luarsky (GitHub, Discord)
-Contributor: impopular
+Developers: impopular
 
 All credits to original Infinite Yield, its owner EdgeIY and its developers
 
@@ -28,7 +28,7 @@ local ownerGui:Instance? = owner:WaitForChild('PlayerGui') -- inStudio and owner
 local mouse = owner:GetMouse()
 mouse.TargetFilter = ownerCharacter
 
-local VERSION = 2
+local VERSION = 3
 local PREFIX = ';'
 local CREDITS_TEXT = 'luarsky // impopular'
 local IMAGE_ASSET_IDS = {
@@ -44,6 +44,15 @@ local function createInstance(class,properties)
 		if i ~= 'Parent' then instance[i] = v end
 	end
 	return instance
+end
+
+local function killThread(thread)
+	local threadStatus = coroutine.status(thread)
+	if threadStatus == 'running' or threadStatus == 'suspended' then --[[task.cancel(thread)]] coroutine.close(thread) end
+end
+
+local function killConnection(connection)
+	if connection then connection:Disconnect() end
 end
 
 local function notify(title,message)
@@ -78,9 +87,7 @@ local function notify(title,message)
 	end)
 	coroutine.resume(closing)
 	local function pinNotification()
-		--task.cancel(closing)
-		local threadStatus = coroutine.status(closing)
-		if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(closing) end
+		killThread(closing)
 		TweenService:Create(titleFrame,TweenInfo.new(.25,'Quad','InOut',0,true),{BackgroundColor3=Color3.fromRGB(48,29,70)}):Play()
 	end
 	pin.MouseButton1Click:Once(pinNotification)
@@ -133,12 +140,12 @@ end
 
 local function getRootPart(player:Player?):BasePart?
 	local character = player.Character
-	return character and character:WaitForChild('HumanoidRootPart',1)
+	return character and character:WaitForChild('HumanoidRootPart')
 end
 
 local function getHumanoid(player:Player?):Humanoid?
 	local character = player.Character
-	return character and character:WaitForChild('Humanoid',1)
+	return character and character:WaitForChild('Humanoid')
 end
 
 do -- credits to rasen46 (Vortex,Discord,GitHub)
@@ -324,8 +331,7 @@ do
 	function stopDragging(dragObject)
 		if not drags[dragObject] then return end
 		for _,v in drags[dragObject] do
-			v:Disconnect()
-			v = nil
+			v = killConnection(v)
 		end
 		drags[dragObject] = nil
 	end
@@ -345,8 +351,7 @@ do
 			local function onMouseButton1Up()
 				local draggingIndex = table.find(drags[dragObject],dragging)
 				if draggingIndex then table.remove(drags[dragObject],draggingIndex) end
-				dragging:Disconnect()
-				dragging = nil
+				dragging = killConnection(dragging)
 			end
 			table.insert(drags[dragObject],dragDetector.MouseButton1Up:Once(onMouseButton1Up))
 		end
@@ -356,7 +361,7 @@ end
 
 if not inStudio then
 	local success,latestVersion = pcall(game.HttpGet,game,'https://raw.githubusercontent.com/luarsky/iyve/master/version')
-	if success and tonumber(latestVersion) ~= VERSION then notify('Outdated','Get the new version at github.com/luarsky/iyve') end
+	if success and VERSION < tonumber(latestVersion) then notify('Outdated','Get the new version at github.com/luarsky/iyve') end
 end
 
 do
@@ -404,6 +409,11 @@ end
 
 do
 	local sessionTime = 0
+	--[[task.spawn(function()
+		while wait(1) do
+			sessionTime += 1
+		end
+	end)]]
 	do
 		local timeIncrease = coroutine.create(function()
 			while wait(1) do
@@ -412,11 +422,6 @@ do
 		end)
 		coroutine.resume(timeIncrease)
 	end
-	--[[task.spawn(function()
-		while wait(1) do
-			sessionTime += 1
-		end
-	end)]]
 	table.insert(COMMANDS,{
 		['serverinfo / info'] = {
 			description = 'Gives you info about the server',
@@ -482,7 +487,7 @@ end
 do
 	local enabled = false
 	table.insert(COMMANDS,{
-		['vordex / dex'] = {
+		['explorer / vordex / dex'] = {
 			description = 'Opens Dex by impopular',
 			execute = function()
 				if inStudio then notify('Dex',"Can't use in Studio") return end
@@ -495,6 +500,21 @@ do
 	})
 end
 
+table.insert(COMMANDS,{
+	['commandcount / cmdcount'] = {
+		description = 'Shows how many teams there are currently',
+		execute = function()
+			local amount = 0
+			for _,command in COMMANDS do
+				for name in command do
+					amount += name ~= '' and 1 or 0
+				end
+			end
+			notify('CMDS',`{amount} commands are currently available`)
+		end
+	}
+})
+
 do
 	local enabled = false
 	table.insert(COMMANDS,{
@@ -504,9 +524,11 @@ do
 				local check = inStudio and "Can't use in Studio" or not cursorMove and "Your exploit doesn't support this feature" or enabled and 'Anti AFK is already running' or ''
 				if check ~= '' then notify('Anti AFK',check) return end
 				enabled = true
+				notify('Anti AFK','Enabled')
 				while wait(600) do
 					local currentX,currentY = mouse.X,mouse.Y
 					cursorMove(currentX+1,currentY+1)
+					wait()
 					cursorMove(currentX,currentY)
 				end
 			end
@@ -590,10 +612,8 @@ do
 							until lastParent == ownerGui
 						end
 						if not v.status or isIY then continue end
-						v.enterConnection:Disconnect()
-						v.enterConnection = nil
-						v.leaveConnection:Disconnect()
-						v.leaveConnection = nil
+						v.enterConnection = killConnection(v.enterConnection)
+						v.leaveConnection = killConnection(v.leaveConnection)
 						i:Destroy()
 						hovers[i] = nil
 					end
@@ -622,14 +642,11 @@ do
 				if not enabled then notify('GUI Remove',"GUI Remove isn't enabled") return end
 				enabled = false
 				if deleting then
-					deleting:Disconnect()
-					deleting = nil
+					deleting = killConnection(deleting)
 				end
 				for _,v in hovers do
-					v.enterConnection:Disconnect()
-					v.enterConnection = nil
-					v.leaveConnection:Disconnect()
-					v.leaveConnection = nil
+					v.enterConnection = killConnection(v.enterConnection)
+					v.leaveConnection = killConnection(v.leaveConnection)
 				end
 				table.clear(hovers)
 				notify('GUI Remove','GUI Remove has been disabled')
@@ -640,11 +657,11 @@ end
 
 table.insert(COMMANDS,{
 	['hideiy'] = {
-		description = 'Hides the main IY GUI',
+		description = 'Hides whole IY GUI',
 		execute = function()
-			terminal.Visible = false
-			notifications.Visible = false
-			tips.Visible = false
+			for _,v:Frame? in IY:GetChildren() do
+				if v:IsA('Frame') then v.Visible = false end
+			end
 		end
 	}
 })
@@ -653,9 +670,9 @@ table.insert(COMMANDS,{
 	['showiy / unhideiy'] = {
 		description = 'Shows IY again',
 		execute = function()
-			terminal.Visible = true
-			notifications.Visible = true
-			tips.Visible = true
+			for _,v:Frame? in IY:GetChildren() do
+				if v:IsA('Frame') then v.Visible = true end
+			end
 		end
 	}
 })
@@ -696,9 +713,12 @@ do
 					if not part.Parent then continue end
 					for property,v in data do
 						part[property] = v
+						part[property] = nil
 					end
 				end
-				table.clear(parts)
+				parts = nil
+				parts = {}
+				--table.clear(parts)
 			end
 		}
 	})
@@ -753,7 +773,6 @@ do
 					lastPivot = newPivot
 				end
 				noclipping = RunService.Heartbeat:Connect(onHeartbeat)
-				notify('Noclip','Noclip enabled')
 			end
 		}
 	})
@@ -762,10 +781,7 @@ do
 			description = 'Disables noclip',
 			execute = function()
 				if not noclipping then return end
-				noclipping:Disconnect()
-				noclipping = nil
-				if ownerHumanoid:IsDead() then return end
-				notify('Noclip','Noclip disabled')
+				noclipping = killConnection(noclipping)
 			end
 		}
 	})
@@ -791,7 +807,6 @@ do
 					bodyVelocity.Velocity = moveDirection == Vector3.zero and Vector3.yAxis*2 or moveDirection*SPEED
 				end
 				flying = RunService.Heartbeat:Connect(onHeartbeat)
-				notify('Fly','Fly enabled')
 			end
 		}
 	})
@@ -800,14 +815,11 @@ do
 			description = 'Disables fly with BodyMovers',
 			execute = function()
 				if not flying then return end
-				flying:Disconnect()
-				flying = nil
+				flying = killConnection(flying)
 				for _,v in bodyMovers do
 					if v.Parent then v:Destroy() end
 				end
 				table.clear(bodyMovers)
-				if ownerHumanoid:IsDead() then return end
-				notify('Fly','Fly disabled')
 			end
 		}
 	})
@@ -842,7 +854,6 @@ do -- not really like original but yes
 					lastPosition = newPivot.Position
 				end
 				flying = RunService.Heartbeat:Connect(onHeartbeat)
-				notify('CFrame fly','CFrame fly enabled')
 			end
 		}
 	})
@@ -851,10 +862,7 @@ do -- not really like original but yes
 			description = 'Disables cframefly',
 			execute = function()
 				if not flying then return end
-				flying:Disconnect()
-				flying = nil
-				if ownerHumanoid:IsDead() then return end
-				notify('CFramefly','CFramefly disabled')
+				flying = killConnection(flying)
 			end
 		}
 	})
@@ -877,7 +885,7 @@ do
 			execute = function()
 				if connections.floating or ownerHumanoid:IsDead() then return end
 				local startPivot = ownerCharacter:GetPivot()*CFrame.new(0,-.1,0)
-				platform = createInstance('Part',{Parent=workspace,Name='Platform',Transparency=1,CFrame=startPivot,Size=Vector3.new(2,.2,1.5)})
+				platform = createInstance('Part',{Parent=workspace,Name='Platform',Transparency=.5,CFrame=startPivot,Size=Vector3.new(2,.2,1.5)})
 				local y = startPivot.Position.Y
 				local function onHeartbeat()
 					if ownerHumanoid:IsDead() or not platform.Parent then execute('unfloat') return end
@@ -891,15 +899,9 @@ do
 					local key = input.KeyCode.Name
 					if gameProcessedEvent or (key ~= 'E' and key ~= 'Q') then return end
 					if key == 'E' and UpDown.Q then
-						--task.cancel(UpDown.Q)
-						local threadStatus = coroutine.status(UpDown.Q)
-						if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(UpDown.Q) end
-						UpDown.Q = nil
+						UpDown.Q = killThread(UpDown.Q)
 					elseif key == 'Q' and UpDown.E then
-						--task.cancel(UpDown.E)
-						local threadStatus = coroutine.status(UpDown.E)
-						if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(UpDown.E) end
-						UpDown.E = nil
+						UpDown.E = killThread(UpDown.E)
 					end
 					--[[UpDown[key] = task.spawn(function()
 						repeat
@@ -927,15 +929,11 @@ do
 			execute = function()
 				if not connections.floating then return end
 				for _,v in UpDown do
-					--task.cancel(v)
-					local threadStatus = coroutine.status(v)
-					if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(v) end
-					v = nil
+					v = killThread(v)
 				end
 				table.clear(UpDown)
 				for _,v in connections do
-					v:Disconnect()
-					v = nil
+					v = killConnection(v)
 				end
 				table.clear(connections)
 				if platform.Parent then platform:Destroy() end
@@ -1034,10 +1032,7 @@ do
 			description = 'Stops teleporting you to a player',
 			execute = function()
 				if not loop then return end
-				--task.cancel(loop)
-				local threadStatus = coroutine.status(loop)
-				if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(loop) end
-				loop = nil
+				loop = killThread(loop)
 			end
 		}
 	})
@@ -1129,10 +1124,7 @@ do
 				if not loop then return end
 				local undoPlayers = getPlayerArgument(text:split(' ')[1]) or 'all'
 				local function undoAll()
-					--task.cancel(loop)
-					local threadStatus = coroutine.status(loop)
-					if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(loop) end
-					loop = nil
+					loop = killThread(loop)
 					table.clear(broughtPlayers)
 				end
 				if undoPlayers == 'all' then
@@ -1183,8 +1175,7 @@ do
 				if not connection then return end
 				local undoPlayers = getPlayerArgument(text:split(' ')[1]) or 'all'
 				local function undoAll()
-					connection:Disconnect()
-					connection = nil
+					connection = killConnection(connection)
 					table.clear(frozenPlayers)
 				end
 				if undoPlayers == 'all' then
@@ -1249,8 +1240,7 @@ do
 			description = 'Removes your custom spawn point',
 			execute = function()
 				if not enabled then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 				spawnLocation = nil
 				enabled = false
 				notify('Spawn Point','Removed spawn point')
@@ -1326,8 +1316,7 @@ do
 			description = 'Disables clickteleport',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 				notify('Click Teleport','Disabled')
 			end
 		}
@@ -1351,8 +1340,7 @@ do
 	end
 	local function undoAll()
 		if updateStatus then
-			updateStatus:Disconnect()
-			updateStatus = nil
+			updateStatus = killConnection(updateStatus)
 		end
 		for i in marked do
 			removePlayer(i)
@@ -1470,9 +1458,13 @@ do
 			description = 'Restores transparency to all parts in workspace',
 			execute = function()
 				for i:BasePart,v in xrayParts do
-					if i.Parent then i.Transparency = v end
+					if not i.Parent then continue end
+					i.Transparency = v
+					xrayParts[i] = nil
 				end
-				table.clear(xrayParts)
+				xrayParts = nil
+				xrayParts = {}
+				--table.clear(xrayParts)
 			end
 		}
 	})
@@ -1675,13 +1667,9 @@ do
 			description = 'Stops ro-banging',
 			execute = function()
 				if not banging then return end
-				--task.cancel(banging)
-				local threadStatus = coroutine.status(banging)
-				if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(banging) end
-				banging = nil
+				banging = killThread(banging)
 				if not resetVelocity then return end
-				resetVelocity:Disconnect()
-				resetVelocity = nil
+				resetVelocity = killConnection(resetVelocity)
 			end
 		}
 	})
@@ -1725,9 +1713,7 @@ do
 				local jerkTool:Tool? = ownerCharacter:FindFirstChild('Jerk Off') or ownerBackpack:FindFirstChild('Jerk Off')
 				if jerkTool then jerkTool:Destroy() end
 				if not jerking then return end
-				local threadStatus = coroutine.status(jerking)
-				if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(jerking) end
-				jerking = nil
+				jerking = killThread(jerking)
 			end
 		}
 	})
@@ -1760,8 +1746,7 @@ do
 			description = 'Undoes carpet',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 			end
 		}
 	})
@@ -1771,8 +1756,7 @@ do
 	local connection
 	local function unLay()
 		if not connection then return end
-		connection:Disconnect()
-		connection = nil
+		connection = killConnection(connection)
 	end
 	table.insert(COMMANDS,{
 		['lay (GLITCHY)'] = {
@@ -1838,8 +1822,7 @@ do
 				wait()
 				local function unSit()
 					if connection then
-						connection:Disconnect()
-						connection = nil
+						connection = killConnection(connection)
 					end
 					if seat.Parent then seat:Destroy() end
 				end
@@ -1866,8 +1849,7 @@ do
 				wait()
 				local function unSit()
 					if connection then
-						connection:Disconnect()
-						connection = nil
+						connection = killConnection(connection)
 					end
 					if seat.Parent then seat:Destroy() end
 				end
@@ -1915,8 +1897,7 @@ do
 			description = 'Disables orbit',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 			end
 		}
 	})
@@ -1975,8 +1956,7 @@ do
 			description = 'Disables upsidedown',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 				if ownerHumanoid:IsDead() then return end
 				ownerCharacter:PivotTo(ownerCharacter:GetPivot()*CFrame.Angles(0,0,math.rad(180)))
 			end
@@ -2009,8 +1989,7 @@ do
 			description = 'Disables stareat',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 			end
 		}
 	})
@@ -2033,7 +2012,9 @@ do
 				spasming = coroutine.create(function()
 					repeat
 						ownerCharacter.Velocity = Vector3.zero
-						ownerCharacter:PivotTo(ownerCharacter:GetPivot()*CFrame.Angles(math.rad(math.random(-30,30)),math.rad(math.random(-30,30)),math.rad(math.random(-30,30))))
+						local pivot = ownerCharacter:GetPivot()
+						local yRotation = math.deg(select(2,pivot.Rotation:ToEulerAnglesXYZ()))
+						ownerCharacter:PivotTo(CFrame.new(pivot.Position)*CFrame.Angles(math.rad(math.random(-30,30)),math.rad(yRotation+math.random(-30,30)),math.rad(math.random(-30,30))))
 						wait(.025)
 					until ownerHumanoid:IsDead()
 				end)
@@ -2046,13 +2027,28 @@ do
 			description = 'Stops spasm',
 			execute = function()
 				if not spasming then return end
-				local threadStatus = coroutine.status(spasming)
-				if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(spasming) end
-				spasming = nil
+				spasming = killThread(spasming)
 			end
 		}
 	})
 end
+
+table.insert(COMMANDS,{
+	['scare / spook [player]'] = {
+		description = 'Teleports in front of a player for half a second',
+		execute = function(text:string)
+			local player = getPlayerArgument(text:split(' ')[1])[1]
+			local character = player and player.Character
+			local humanoid = getHumanoid(player)
+			if not humanoid or humanoid:IsDead() or ownerHumanoid:IsDead() then return end
+			local lastCFrame = ownerCharacter:GetPivot()
+			ownerCharacter:PivotTo(character:GetPivot()*CFrame.new(0,0,-2)*CFrame.Angles(0,math.rad(180),0))
+			wait(.5)
+			if ownerHumanoid:IsDead() then return end
+			ownerCharacter:PivotTo(lastCFrame)
+		end
+	}
+})
 
 table.insert(COMMANDS,{
 	[''] = {}
@@ -2120,8 +2116,7 @@ do
 			description = 'Disables infjump',
 			execute = function()
 				if not connections.infJump then return end
-				connections.infJump:Disconnect()
-				connections.infJump = nil
+				connections.infJump = killConnection(connections.infJump)
 				notify('Infinite Jump','Disabled')
 			end
 		}
@@ -2152,8 +2147,7 @@ do
 			description = 'Disables flyjump',
 			execute = function()
 				if not connections.flyJump then return end
-				connections.flyJump:Disconnect()
-				connections.flyJump = nil
+				connections.flyJump = killConnection(connections.flyJump)
 				notify('Fly Jump','Disabled')
 			end
 		}
@@ -2271,8 +2265,7 @@ do
 			description = 'Turns off hovername',
 			execute = function()
 				if not connection then return end
-				connection:Disconnect()
-				connection = nil
+				connection = killConnection(connection)
 				hideLabel()
 			end
 		}
@@ -2480,10 +2473,7 @@ do
 	local collapsing
 	local function stopCollapsing()
 		if not collapsing then return end
-		--task.cancel(collapsing)
-		local threadStatus = coroutine.status(collapsing)
-		if threadStatus == 'running' or threadStatus == 'suspended' then coroutine.close(collapsing) end
-		collapsing = nil
+		collapsing = killThread(collapsing)
 	end
 	local oldMovement = {WalkSpeed=0,JumpPower=0}
 	terminalBarTyping = false
@@ -2495,8 +2485,7 @@ do
 			ownerHumanoid[i] = v
 		end
 		if typingConnection then
-			typingConnection:Disconnect()
-			typingConnection = nil
+			typingConnection = killConnection(typingConnection)
 		end
 		barTextBox.Text = ''
 		showAvailableCommands()
@@ -2602,8 +2591,7 @@ do
 			if not loaded then return end
 			tip.Visible = false
 			if not mouseTipMoving then return end
-			mouseTipMoving:Disconnect()
-			mouseTipMoving = nil
+			mouseTipMoving = killConnection(mouseTipMoving)
 		end
 		cmdList.MouseEnter:Connect(onMouseEnter)
 		cmdList.MouseLeave:Connect(onMouseLeave)
@@ -2646,8 +2634,7 @@ do
 		local function onMouseButton1Up()
 			if not loaded then return end
 			if mouseScrollMoving then
-				mouseScrollMoving:Disconnect()
-				mouseScrollMoving = nil
+				mouseScrollMoving = killConnection(mouseScrollMoving)
 			end
 			stopScrolling()
 		end
@@ -2683,11 +2670,15 @@ do
 	loaded = true
 end
 
--- why server side ONLY?
+--[[
 
---[[do
+why server side ONLY?
+
+do
 	local function onChatted(message:string)
 		if message:find(PREFIX) == 1 then execute(message:sub(2,-1)) end
 	end
 	owner.Chatted:Connect(onChatted)
-end]]
+end
+
+]]
